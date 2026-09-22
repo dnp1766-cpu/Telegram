@@ -31,7 +31,7 @@ from formatters import (
     search_results_html,
     split_text,
 )
-from i18n import area_label, category_label
+from i18n import FEATURED_AREAS, area_label, category_label
 from mealdb import Meal, MealDBClient, MealSummary
 
 load_dotenv()
@@ -113,7 +113,7 @@ def category_buttons() -> InlineKeyboardMarkup:
 
 
 def area_buttons() -> InlineKeyboardMarkup:
-    areas = mealdb().list_areas()
+    areas = list(FEATURED_AREAS)
     rows: list[list[InlineKeyboardButton]] = []
     row: list[InlineKeyboardButton] = []
     for area in areas:

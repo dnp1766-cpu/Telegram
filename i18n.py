@@ -29,6 +29,7 @@ AREA_RU: dict[str, str] = {
     "Egyptian": "Египетская",
     "Filipino": "Филиппинская",
     "French": "Французская",
+    "German": "Немецкая",
     "Greek": "Греческая",
     "Indian": "Индийская",
     "Irish": "Ирландская",
@@ -39,6 +40,7 @@ AREA_RU: dict[str, str] = {
     "Malaysian": "Малайзийская",
     "Mexican": "Мексиканская",
     "Moroccan": "Марокканская",
+    "Netherlands": "Нидерландская",
     "Polish": "Польская",
     "Portuguese": "Португальская",
     "Russian": "Русская",
@@ -50,6 +52,39 @@ AREA_RU: dict[str, str] = {
     "Unknown": "Не указана",
     "Vietnamese": "Вьетнамская",
 }
+
+# TheMealDB list.php?a=list сейчас отдаёт сотни стран.
+# В боте показываем только кухни, по которым обычно есть рецепты.
+FEATURED_AREAS: tuple[str, ...] = (
+    "American",
+    "British",
+    "Canadian",
+    "Chinese",
+    "Croatian",
+    "Dutch",
+    "Egyptian",
+    "Filipino",
+    "French",
+    "Greek",
+    "Indian",
+    "Irish",
+    "Italian",
+    "Jamaican",
+    "Japanese",
+    "Kenyan",
+    "Malaysian",
+    "Mexican",
+    "Moroccan",
+    "Polish",
+    "Portuguese",
+    "Russian",
+    "Spanish",
+    "Thai",
+    "Tunisian",
+    "Turkish",
+    "Ukrainian",
+    "Vietnamese",
+)
 
 
 def category_label(name: str | None) -> str:

@@ -126,6 +126,7 @@ class I18nTests(unittest.TestCase):
     def test_known_and_unknown_labels(self) -> None:
         self.assertEqual(category_label("Chicken"), "Курица")
         self.assertEqual(area_label("Russian"), "Русская")
+        self.assertEqual(area_label("Netherlands"), "Нидерландская")
         self.assertEqual(category_label("Custom"), "Custom")
 
 

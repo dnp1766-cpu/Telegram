@@ -20,9 +20,10 @@ def esc(value: str | None) -> str:
 
 def layout(title: str, body: str) -> str:
     return f"""<!doctype html>
-<html lang="ru">
+<html lang="ru" translate="no">
 <head>
   <meta charset="utf-8">
+  <meta name="google" content="notranslate">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{esc(title)}</title>
   <style>

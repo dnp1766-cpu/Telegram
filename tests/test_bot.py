@@ -15,6 +15,13 @@ class BotWiringTests(unittest.TestCase):
         self.assertIn(CallbackQueryHandler, handler_types)
         self.assertIn(MessageHandler, handler_types)
 
+    def test_area_keyboard_stays_compact(self) -> None:
+        markup = bot.area_buttons()
+        labels = [button.text for row in markup.inline_keyboard for button in row]
+        self.assertIn("Итальянская", labels)
+        self.assertIn("Русская", labels)
+        self.assertLessEqual(len(labels), 32)
+
     def test_meal_buttons_include_random(self) -> None:
         from mealdb import parse_meal
         from tests.test_mealdb import SAMPLE_MEAL
