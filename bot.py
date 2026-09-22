@@ -1,4 +1,4 @@
-"""Telegram-бот рецептов на TheMealDB."""
+"""Telegram-бот: поиск рецептов в TheMealDB и избранное в SQLite."""
 
 from __future__ import annotations
 
@@ -25,14 +25,15 @@ from telegram.ext import (
 )
 
 from formatters import (
+    favorites_html,
     ingredients_html,
     instructions_html,
     recipe_caption,
     search_results_html,
     split_text,
 )
-from i18n import FEATURED_AREAS, area_label, category_label
-from mealdb import Meal, MealDBClient, MealSummary
+from mealdb import Meal, MealDBClient
+from storage import FavoriteStore
 
 load_dotenv()
 
@@ -42,9 +43,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("recipe-bot")
 
-BTN_RANDOM = "Случайный рецепт"
-BTN_CATEGORIES = "Категории"
-BTN_AREAS = "Кухни мира"
+BTN_SEARCH = "Поиск рецептов"
+BTN_FAVORITES = "Мои рецепты"
+STATE_SEARCH = "awaiting_search"
 PAGE_SIZE = 8
 
 
@@ -53,85 +54,63 @@ def mealdb() -> MealDBClient:
     return MealDBClient()
 
 
+def store() -> FavoriteStore:
+    existing = getattr(store, "_instance", None)
+    if existing is None:
+        existing = FavoriteStore()
+        setattr(store, "_instance", existing)
+    return existing
+
+
+def set_store(instance: FavoriteStore | None) -> None:
+    setattr(store, "_instance", instance)
+
+
 def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton(BTN_RANDOM)],
-            [KeyboardButton(BTN_CATEGORIES), KeyboardButton(BTN_AREAS)],
+            [KeyboardButton(BTN_SEARCH)],
+            [KeyboardButton(BTN_FAVORITES)],
         ],
         resize_keyboard=True,
     )
 
 
-def meal_buttons(meal: Meal) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
-    links: list[InlineKeyboardButton] = []
-    if meal.youtube:
-        links.append(InlineKeyboardButton("YouTube", url=meal.youtube))
-    if meal.source:
-        links.append(InlineKeyboardButton("Источник", url=meal.source))
-    if links:
-        rows.append(links)
-    rows.append([InlineKeyboardButton("Ещё случайный", callback_data="rand")])
-    return InlineKeyboardMarkup(rows)
+def meal_buttons(meal: Meal, *, is_favorite: bool) -> InlineKeyboardMarkup:
+    if is_favorite:
+        button = InlineKeyboardButton("Убрать из избранного", callback_data=f"unfav:{meal.id}")
+    else:
+        button = InlineKeyboardButton("В избранное", callback_data=f"fav:{meal.id}")
+    return InlineKeyboardMarkup([[button]])
 
 
-def meal_list_buttons(
-    meals: list[Meal] | list[MealSummary],
-    *,
-    prefix: str | None = None,
-    page: int = 0,
-) -> InlineKeyboardMarkup:
+def meal_list_buttons(meals: list[Meal], *, page: int = 0, prefix: str = "list") -> InlineKeyboardMarkup:
     start = page * PAGE_SIZE
     chunk = meals[start : start + PAGE_SIZE]
-    rows = [
-        [InlineKeyboardButton(meal.name[:64], callback_data=f"m:{meal.id}")]
-        for meal in chunk
-    ]
+    rows = [[InlineKeyboardButton(meal.name[:64], callback_data=f"m:{meal.id}")] for meal in chunk]
     nav: list[InlineKeyboardButton] = []
-    if prefix and page > 0:
+    if page > 0:
         nav.append(InlineKeyboardButton("Назад", callback_data=f"{prefix}:{page - 1}"))
-    if prefix and start + PAGE_SIZE < len(meals):
+    if start + PAGE_SIZE < len(meals):
         nav.append(InlineKeyboardButton("Ещё", callback_data=f"{prefix}:{page + 1}"))
     if nav:
         rows.append(nav)
     return InlineKeyboardMarkup(rows)
 
 
-def category_buttons() -> InlineKeyboardMarkup:
-    categories = mealdb().categories()
-    rows = [
-        [
-            InlineKeyboardButton(
-                category_label(item.name),
-                callback_data=f"c:{item.name}:0",
-            )
-        ]
-        for item in categories
-    ]
-    return InlineKeyboardMarkup(rows)
+def user_id_of(update: Update) -> int | None:
+    user = update.effective_user
+    return user.id if user else None
 
 
-def area_buttons() -> InlineKeyboardMarkup:
-    areas = list(FEATURED_AREAS)
-    rows: list[list[InlineKeyboardButton]] = []
-    row: list[InlineKeyboardButton] = []
-    for area in areas:
-        row.append(InlineKeyboardButton(area_label(area), callback_data=f"a:{area}:0"))
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
-    return InlineKeyboardMarkup(rows)
-
-
-async def send_meal(update: Update, meal: Meal) -> None:
-    caption = recipe_caption(meal)
-    markup = meal_buttons(meal)
+async def send_meal(update: Update, meal: Meal, user_id: int | None = None) -> None:
     message = update.effective_message
     if message is None:
         return
+    current_user = user_id or user_id_of(update)
+    is_favorite = bool(current_user and store().is_favorite(current_user, meal.id))
+    markup = meal_buttons(meal, is_favorite=is_favorite)
+    caption = recipe_caption(meal)
 
     if meal.image_url:
         await message.reply_photo(
@@ -149,154 +128,145 @@ async def send_meal(update: Update, meal: Meal) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    del context
     if update.message is None:
         return
+    context.user_data["state"] = None
     await update.message.reply_html(
         "Привет! Я бот рецептов.\n\n"
-        "Беру блюда и картинки из <b>TheMealDB</b>.\n"
-        "Напиши название блюда, выбери категорию или попроси случайный рецепт.",
+        "Ищу блюда в <b>TheMealDB</b> и сохраняю избранное у тебя в базе.\n"
+        "Выбери действие:",
         reply_markup=main_keyboard(),
     )
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    del context
-    if update.message is None:
+async def ask_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_message is None:
         return
-    await update.message.reply_html(
-        "<b>Как пользоваться</b>\n"
-        "• Напиши название блюда — например, <code>pasta</code> или <code>chicken</code>\n"
-        "• /random — случайный рецепт с фото\n"
-        "• /categories — категории TheMealDB\n"
-        "• /areas — кухни мира\n"
-        "• /search pizza — поиск по названию",
+    context.user_data["state"] = STATE_SEARCH
+    await update.effective_message.reply_text(
+        "Напиши название блюда — например, pasta или cake.",
         reply_markup=main_keyboard(),
     )
 
 
-async def random_recipe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_favorites(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
     del context
-    meal = mealdb().random()
-    if meal is None:
-        if update.effective_message:
-            await update.effective_message.reply_text("Не удалось получить рецепт. Попробуй ещё раз.")
+    message = update.effective_message
+    if message is None:
         return
-    await send_meal(update, meal)
-
-
-async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    del context
-    if update.effective_message is None:
+    user_id = user_id_of(update)
+    if user_id is None:
+        await message.reply_text("Не удалось определить пользователя.")
         return
-    await update.effective_message.reply_text(
-        "Выбери категорию:",
-        reply_markup=category_buttons(),
+    meals = store().list_for_user(user_id)
+    if not meals:
+        await message.reply_html(
+            "Пока нет избранных рецептов.\n"
+            "Найди блюдо через «Поиск рецептов» и нажми <b>В избранное</b>.",
+            reply_markup=main_keyboard(),
+        )
+        return
+    await message.reply_html(
+        favorites_html(meals),
+        reply_markup=meal_list_buttons(meals, page=page, prefix="favs"),
     )
 
 
-async def show_areas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    del context
-    if update.effective_message is None:
+async def reply_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str) -> None:
+    message = update.effective_message
+    if message is None:
         return
-    await update.effective_message.reply_text(
-        "Выбери кухню:",
-        reply_markup=area_buttons(),
-    )
-
-
-async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = " ".join(context.args or []).strip()
-    if not query:
-        if update.message:
-            await update.message.reply_text("Напиши запрос так: /search pasta")
-        return
-    await reply_search(update, query)
-
-
-async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message is None or not update.message.text:
-        return
-    text = update.message.text.strip()
-    if text == BTN_RANDOM:
-        await random_recipe(update, context)
-        return
-    if text == BTN_CATEGORIES:
-        await show_categories(update, context)
-        return
-    if text == BTN_AREAS:
-        await show_areas(update, context)
-        return
-    await reply_search(update, text)
-
-
-async def reply_search(update: Update, query: str) -> None:
     meals = mealdb().search(query)
-    if update.effective_message is None:
-        return
+    context.user_data["last_search"] = [item.to_payload() for item in meals]
+    context.user_data["last_query"] = query
     if len(meals) == 1:
         await send_meal(update, meals[0])
         return
-    await update.effective_message.reply_html(
+    await message.reply_html(
         search_results_html(query, meals),
-        reply_markup=meal_list_buttons(meals),
+        reply_markup=meal_list_buttons(meals, prefix="list") if meals else None,
+    )
+
+
+async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None or not update.message.text:
+        return
+    text = update.message.text.strip()
+    if text == BTN_SEARCH:
+        await ask_search(update, context)
+        return
+    if text == BTN_FAVORITES:
+        context.user_data["state"] = None
+        await show_favorites(update, context)
+        return
+    if context.user_data.get("state") == STATE_SEARCH:
+        await reply_search(update, context, text)
+        return
+    await update.message.reply_text(
+        "Выбери действие на клавиатуре: «Поиск рецептов» или «Мои рецепты».",
+        reply_markup=main_keyboard(),
     )
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    del context
     query = update.callback_query
     if query is None or not query.data:
         return
-    await query.answer()
+    user_id = user_id_of(update)
     data = query.data
 
-    if data == "rand":
-        meal = mealdb().random()
-        if meal is None:
-            await query.message.reply_text("Не удалось получить рецепт.")
-            return
-        await send_meal(update, meal)
+    if data.startswith("favs:"):
+        await query.answer()
+        await show_favorites(update, context, page=int(data.split(":", 1)[1]))
+        return
+
+    if data.startswith("list:"):
+        await query.answer()
+        page = int(data.split(":", 1)[1])
+        meals = [Meal.from_payload(item) for item in context.user_data.get("last_search") or []]
+        last_query = context.user_data.get("last_query") or "поиск"
+        if update.effective_message:
+            await update.effective_message.reply_html(
+                search_results_html(last_query, meals),
+                reply_markup=meal_list_buttons(meals, page=page, prefix="list"),
+            )
         return
 
     if data.startswith("m:"):
-        meal = mealdb().lookup(data.split(":", 1)[1])
+        await query.answer()
+        meal_id = data.split(":", 1)[1]
+        meal = (store().get(user_id, meal_id) if user_id else None) or mealdb().lookup(meal_id)
         if meal is None:
-            await query.message.reply_text("Рецепт не найден.")
+            if query.message:
+                await query.message.reply_text("Рецепт не найден.")
             return
-        await send_meal(update, meal)
+        await send_meal(update, meal, user_id)
         return
 
-    if data.startswith("c:"):
-        _, category, page_raw = data.split(":", 2)
-        page = int(page_raw)
-        meals = mealdb().filter_by_category(category)
-        await query.message.reply_html(
-            f"Категория: <b>{category_label(category)}</b> ({len(meals)})",
-            reply_markup=meal_list_buttons(meals, prefix=f"c:{category}", page=page),
-        )
-        return
-
-    if data.startswith("a:"):
-        _, area, page_raw = data.split(":", 2)
-        page = int(page_raw)
-        meals = mealdb().filter_by_area(area)
-        await query.message.reply_html(
-            f"Кухня: <b>{area_label(area)}</b> ({len(meals)})",
-            reply_markup=meal_list_buttons(meals, prefix=f"a:{area}", page=page),
-        )
+    if data.startswith("fav:") or data.startswith("unfav:"):
+        if user_id is None:
+            await query.answer("Не удалось определить пользователя.", show_alert=True)
+            return
+        meal_id = data.split(":", 1)[1]
+        meal = store().get(user_id, meal_id) or mealdb().lookup(meal_id)
+        if meal is None:
+            await query.answer("Рецепт не найден.", show_alert=True)
+            return
+        if data.startswith("fav:"):
+            store().add(user_id, meal)
+            await query.answer("Сохранено в избранное")
+            await query.edit_message_reply_markup(meal_buttons(meal, is_favorite=True))
+        else:
+            store().remove(user_id, meal_id)
+            await query.answer("Убрано из избранного")
+            await query.edit_message_reply_markup(meal_buttons(meal, is_favorite=False))
 
 
 def build_application(token: str) -> Application:
     application = Application.builder().token(token).build()
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("random", random_recipe))
-    application.add_handler(CommandHandler("categories", show_categories))
-    application.add_handler(CommandHandler("areas", show_areas))
-    application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CallbackQueryHandler(on_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_search))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     return application
 
 

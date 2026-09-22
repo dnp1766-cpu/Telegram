@@ -81,6 +81,42 @@ class Meal:
     def to_summary(self) -> MealSummary:
         return MealSummary(id=self.id, name=self.name, thumbnail=self.thumbnail)
 
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "category": self.category,
+            "area": self.area,
+            "instructions": self.instructions,
+            "thumbnail": self.thumbnail,
+            "youtube": self.youtube,
+            "source": self.source,
+            "tags": list(self.tags),
+            "ingredients": [
+                {"name": item.name, "measure": item.measure} for item in self.ingredients
+            ],
+        }
+
+    @staticmethod
+    def from_payload(data: dict[str, Any]) -> Meal:
+        ingredients = [
+            Ingredient(name=str(item.get("name") or ""), measure=str(item.get("measure") or ""))
+            for item in data.get("ingredients") or []
+            if item.get("name")
+        ]
+        return Meal(
+            id=str(data.get("id") or ""),
+            name=_clean(data.get("name")) or "Без названия",
+            category=_clean(data.get("category")),
+            area=_clean(data.get("area")),
+            instructions=_clean(data.get("instructions")),
+            thumbnail=_clean(data.get("thumbnail")),
+            youtube=_clean(data.get("youtube")),
+            source=_clean(data.get("source")),
+            tags=[str(tag) for tag in data.get("tags") or []],
+            ingredients=ingredients,
+        )
+
 
 def _clean(value: Any) -> str | None:
     if value is None:

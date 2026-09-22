@@ -67,7 +67,18 @@ def instructions_html(meal: Meal) -> str:
 def search_results_html(query: str, meals: list[Meal] | list[MealSummary]) -> str:
     if not meals:
         return f"По запросу <b>{escape(query)}</b> ничего не найдено."
-    lines = [f"Нашла <b>{len(meals)}</b> рецепт(ов) по запросу «{escape(query)}»:"]
+    lines = [f"Найдено <b>{len(meals)}</b> рецепт(ов) по запросу «{escape(query)}»:"]
+    for index, meal in enumerate(meals[:8], start=1):
+        lines.append(f"{index}. {escape(meal.name)}")
+    if len(meals) > 8:
+        lines.append(f"\nПоказаны первые 8 из {len(meals)}.")
+    return "\n".join(lines)
+
+
+def favorites_html(meals: list[Meal]) -> str:
+    if not meals:
+        return "Пока нет избранных рецептов."
+    lines = [f"Мои рецепты: <b>{len(meals)}</b>"]
     for index, meal in enumerate(meals[:8], start=1):
         lines.append(f"{index}. {escape(meal.name)}")
     if len(meals) > 8:
