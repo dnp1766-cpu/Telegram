@@ -75,12 +75,26 @@ def search_results_html(query: str, meals: list[Meal] | list[MealSummary]) -> st
     return "\n".join(lines)
 
 
-def favorites_html(meals: list[Meal]) -> str:
-    if not meals:
+def stars_text(rating: int) -> str:
+    if rating <= 0:
+        return "без оценки"
+    return "⭐" * rating
+
+
+def rating_prompt(rating: int = 0) -> str:
+    if rating:
+        return f"Твоя оценка: {stars_text(rating)}\nМожно поставить новую:"
+    return "Оцени рецепт от 1 до 5 звёзд:"
+
+
+def favorites_html(favorites: list) -> str:
+    if not favorites:
         return "Пока нет избранных рецептов."
-    lines = [f"Мои рецепты: <b>{len(meals)}</b>"]
-    for index, meal in enumerate(meals[:8], start=1):
-        lines.append(f"{index}. {escape(meal.name)}")
-    if len(meals) > 8:
-        lines.append(f"\nПоказаны первые 8 из {len(meals)}.")
+    lines = [f"Мои рецепты: <b>{len(favorites)}</b> — сначала с высокой оценкой"]
+    for index, item in enumerate(favorites[:8], start=1):
+        meal = getattr(item, "meal", item)
+        rating = getattr(item, "rating", 0)
+        lines.append(f"{index}. {stars_text(rating)} — {escape(meal.name)}")
+    if len(favorites) > 8:
+        lines.append(f"\nПоказаны первые 8 из {len(favorites)}.")
     return "\n".join(lines)

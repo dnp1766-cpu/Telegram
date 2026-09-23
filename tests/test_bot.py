@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+import unittest.mock
 from unittest.mock import AsyncMock, MagicMock
 
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
@@ -32,6 +33,13 @@ class BotWiringTests(unittest.TestCase):
         remove_labels = [button.text for row in bot.meal_buttons(meal, is_favorite=True).inline_keyboard for button in row]
         self.assertEqual(add_labels, ["В избранное"])
         self.assertEqual(remove_labels, ["Убрать из избранного"])
+
+    def test_rating_buttons_are_one_to_five_stars(self) -> None:
+        meal = parse_meal(SAMPLE_MEAL)
+        labels = [button.text for row in bot.rating_buttons(meal.id).inline_keyboard for button in row]
+        callbacks = [button.callback_data for row in bot.rating_buttons(meal.id).inline_keyboard for button in row]
+        self.assertEqual(labels, ["1⭐", "2⭐", "3⭐", "4⭐", "5⭐"])
+        self.assertEqual(callbacks, [f"rate:{meal.id}:1", f"rate:{meal.id}:2", f"rate:{meal.id}:3", f"rate:{meal.id}:4", f"rate:{meal.id}:5"])
 
 
 class BotFlowTests(unittest.IsolatedAsyncioTestCase):
@@ -93,4 +101,30 @@ class BotFlowTests(unittest.IsolatedAsyncioTestCase):
         markup = update.message.reply_html.await_args.kwargs["reply_markup"]
         self.assertIn("Spicy Arrabiata Penne", text)
         labels = [button.text for row in markup.inline_keyboard for button in row]
-        self.assertIn("Spicy Arrabiata Penne", labels)
+        self.assertTrue(any("Spicy Arrabiata Penne" in label for label in labels))
+        self.assertIn("без оценки", text)
+
+    async def test_rate_callback_saves_stars(self) -> None:
+        meal = parse_meal(SAMPLE_MEAL)
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_message = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = f"rate:{meal.id}:5"
+        update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_text = AsyncMock()
+        update.callback_query.message = update.effective_message
+        context = MagicMock()
+        context.user_data = {}
+
+        with unittest.mock.patch.object(bot, "mealdb") as mealdb_factory:
+            client = MagicMock()
+            client.lookup.return_value = meal
+            mealdb_factory.return_value = client
+            await bot.on_callback(update, context)
+
+        self.assertTrue(self.favorites.is_favorite(42, meal.id))
+        self.assertEqual(self.favorites.get_rating(42, meal.id), 5)
+        update.callback_query.answer.assert_awaited()
+        update.callback_query.edit_message_text.assert_awaited()
+        self.assertIn("⭐⭐⭐⭐⭐", update.callback_query.edit_message_text.await_args.args[0])

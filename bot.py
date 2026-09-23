@@ -28,12 +28,14 @@ from formatters import (
     favorites_html,
     ingredients_html,
     instructions_html,
+    rating_prompt,
     recipe_caption,
     search_results_html,
     split_text,
+    stars_text,
 )
 from mealdb import Meal, MealDBClient
-from storage import FavoriteStore
+from storage import Favorite, FavoriteStore
 
 load_dotenv()
 
@@ -86,6 +88,14 @@ def meal_buttons(meal: Meal, *, is_favorite: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[button]])
 
 
+def rating_buttons(meal_id: str) -> InlineKeyboardMarkup:
+    row = [
+        InlineKeyboardButton(f"{stars}⭐", callback_data=f"rate:{meal_id}:{stars}")
+        for stars in range(1, 6)
+    ]
+    return InlineKeyboardMarkup([row])
+
+
 def meal_list_buttons(meals: list[Meal], *, page: int = 0, prefix: str = "list") -> InlineKeyboardMarkup:
     start = page * PAGE_SIZE
     chunk = meals[start : start + PAGE_SIZE]
@@ -95,6 +105,25 @@ def meal_list_buttons(meals: list[Meal], *, page: int = 0, prefix: str = "list")
         nav.append(InlineKeyboardButton("Назад", callback_data=f"{prefix}:{page - 1}"))
     if start + PAGE_SIZE < len(meals):
         nav.append(InlineKeyboardButton("Ещё", callback_data=f"{prefix}:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    return InlineKeyboardMarkup(rows)
+
+
+def favorite_list_buttons(favorites: list[Favorite], *, page: int = 0) -> InlineKeyboardMarkup:
+    start = page * PAGE_SIZE
+    chunk = favorites[start : start + PAGE_SIZE]
+    rows = []
+    for item in chunk:
+        prefix = f"{stars_text(item.rating)} " if item.rating else ""
+        rows.append(
+            [InlineKeyboardButton(f"{prefix}{item.meal.name}"[:64], callback_data=f"m:{item.meal.id}")]
+        )
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("Назад", callback_data=f"favs:{page - 1}"))
+    if start + PAGE_SIZE < len(favorites):
+        nav.append(InlineKeyboardButton("Ещё", callback_data=f"favs:{page + 1}"))
     if nav:
         rows.append(nav)
     return InlineKeyboardMarkup(rows)
@@ -128,6 +157,9 @@ async def send_meal(update: Update, meal: Meal, user_id: int | None = None) -> N
     for chunk in split_text(instructions_html(meal)):
         await message.reply_html(chunk)
 
+    rating = store().get_rating(current_user, meal.id) if current_user else 0
+    await message.reply_text(rating_prompt(rating), reply_markup=rating_buttons(meal.id))
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None:
@@ -160,8 +192,8 @@ async def show_favorites(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     if user_id is None:
         await message.reply_text("Не удалось определить пользователя.")
         return
-    meals = store().list_for_user(user_id)
-    if not meals:
+    favorites = store().list_for_user(user_id)
+    if not favorites:
         await message.reply_html(
             "Пока нет избранных рецептов.\n"
             "Найди блюдо через «Поиск рецептов» и нажми <b>В избранное</b>.",
@@ -169,8 +201,8 @@ async def show_favorites(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
         )
         return
     await message.reply_html(
-        favorites_html(meals),
-        reply_markup=meal_list_buttons(meals, page=page, prefix="favs"),
+        favorites_html(favorites),
+        reply_markup=favorite_list_buttons(favorites, page=page),
     )
 
 
@@ -243,6 +275,34 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await query.message.reply_text("Рецепт не найден.")
             return
         await send_meal(update, meal, user_id)
+        return
+
+    if data.startswith("rate:"):
+        if user_id is None:
+            await query.answer("Не удалось определить пользователя.", show_alert=True)
+            return
+        parts = data.split(":")
+        if len(parts) != 3:
+            await query.answer("Некорректная оценка.", show_alert=True)
+            return
+        meal_id, rating_raw = parts[1], parts[2]
+        try:
+            rating = int(rating_raw)
+        except ValueError:
+            await query.answer("Некорректная оценка.", show_alert=True)
+            return
+        meal = store().get(user_id, meal_id) or mealdb().lookup(meal_id)
+        if meal is None:
+            await query.answer("Рецепт не найден.", show_alert=True)
+            return
+        if not store().set_rating(user_id, meal, rating):
+            await query.answer("Оценка должна быть от 1 до 5.", show_alert=True)
+            return
+        await query.answer(f"Оценка: {stars_text(rating)}")
+        await query.edit_message_text(
+            rating_prompt(rating),
+            reply_markup=rating_buttons(meal.id),
+        )
         return
 
     if data.startswith("fav:") or data.startswith("unfav:"):
