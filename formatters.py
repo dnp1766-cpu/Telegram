@@ -64,6 +64,14 @@ def instructions_html(meal: Meal) -> str:
     return "<b>Приготовление</b>\n" + escape(text)
 
 
+def video_html(meal: Meal) -> str | None:
+    url = (meal.youtube or "").strip()
+    if not url:
+        return None
+    safe_href = html.escape(url, quote=True)
+    return f'<b>Видеорецепт</b>\n<a href="{safe_href}">{escape(url)}</a>'
+
+
 def search_results_html(query: str, meals: list[Meal] | list[MealSummary]) -> str:
     if not meals:
         return f"По запросу <b>{escape(query)}</b> ничего не найдено."

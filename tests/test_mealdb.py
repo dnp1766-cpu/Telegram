@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from formatters import ingredients_html, recipe_caption, split_text
+from formatters import ingredients_html, recipe_caption, split_text, video_html
 from i18n import area_label, category_label
 from mealdb import MealDBClient, MealDBError, parse_meal
 
@@ -53,6 +53,19 @@ class ParseMealTests(unittest.TestCase):
         ingredients = ingredients_html(meal)
         self.assertIn("penne rigate", ingredients)
         self.assertIn("1 pound", ingredients)
+
+    def test_video_link_shown_only_when_present(self) -> None:
+        meal = parse_meal(SAMPLE_MEAL)
+        video = video_html(meal)
+        self.assertIsNotNone(video)
+        assert video is not None
+        self.assertIn("Видеорецепт", video)
+        self.assertIn("https://www.youtube.com/watch?v=1IszT_guI08", video)
+
+        without = parse_meal({**SAMPLE_MEAL, "strYoutube": ""})
+        self.assertIsNone(video_html(without))
+        missing = parse_meal({**SAMPLE_MEAL, "strYoutube": None})
+        self.assertIsNone(video_html(missing))
 
     def test_split_text_keeps_short_messages(self) -> None:
         self.assertEqual(split_text("hello", 10), ["hello"])

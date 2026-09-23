@@ -33,6 +33,7 @@ from formatters import (
     search_results_html,
     split_text,
     stars_text,
+    video_html,
 )
 from mealdb import Meal, MealDBClient
 from storage import Favorite, FavoriteStore
@@ -156,6 +157,9 @@ async def send_meal(update: Update, meal: Meal, user_id: int | None = None) -> N
     await message.reply_html(ingredients_html(meal))
     for chunk in split_text(instructions_html(meal)):
         await message.reply_html(chunk)
+    video = video_html(meal)
+    if video:
+        await message.reply_html(video)
 
     rating = store().get_rating(current_user, meal.id) if current_user else 0
     await message.reply_text(rating_prompt(rating), reply_markup=rating_buttons(meal.id))
