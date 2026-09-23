@@ -1,5 +1,7 @@
 # Telegram-бот рецептов (TheMealDB)
 
+Бот в Telegram: [@nina_recipes_bot](https://t.me/nina_recipes_bot)
+
 После `/start` у пользователя две кнопки:
 
 - **Поиск рецептов** — ищет блюда и картинки в [TheMealDB](https://www.themealdb.com/)
